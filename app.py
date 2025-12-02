@@ -39,6 +39,7 @@ def _get_first_balance_sheet(ticker: yf.Ticker):
     return None
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_ticker_metrics(ticker_symbol: str) -> Dict[str, Optional[float]]:
     ticker = yf.Ticker(ticker_symbol)
     fast_info = ticker.fast_info or {}
@@ -106,6 +107,10 @@ st.write(
     "All rates are entered as percentages. Risk-free rate is manual (no FRED), "
     "and equity inputs leverage yfinance data."
 )
+st.caption(
+    "yfinance calls are cached for 5 minutes to reduce Yahoo Finance throttling. "
+    "If you get rate-limited, wait briefly or supply manual overrides."
+)
 
 with st.form("wacc_form"):
     ticker_symbol = st.text_input("Ticker", value="AAPL").strip().upper()
@@ -121,6 +126,16 @@ with st.form("wacc_form"):
     tax_rate_pct = st.number_input(
         "Marginal tax rate (%)", min_value=0.0, max_value=100.0, value=25.0, step=0.1
     )
+    manual_market_cap = st.number_input(
+        "Override market cap ($) [optional]",
+        min_value=0.0,
+        value=0.0,
+        step=1_000_000.0,
+        help=(
+            "Use this if yfinance is rate limited or missing data. "
+            "Leave at 0 to use the API value."
+        ),
+    )
     submitted = st.form_submit_button("Calculate WACC")
 
 if submitted:
@@ -129,9 +144,16 @@ if submitted:
     else:
         metrics = fetch_ticker_metrics(ticker_symbol)
 
-        market_cap = metrics.get("market_cap")
-        if market_cap is None:
-            st.error("Unable to retrieve market capitalization for this ticker.")
+        market_cap = manual_market_cap or metrics.get("market_cap")
+        if market_cap is None or market_cap <= 0:
+            st.error(
+                "Unable to retrieve market capitalization for this ticker. "
+                "If Yahoo Finance is rate limiting, try again in a minute or set an override."
+            )
+            st.info(
+                "Tips: avoid rapid repeat requests, use a VPN/static IP to reduce throttling, "
+                "or provide the market cap manually above."
+            )
         else:
             beta = metrics.get("beta") or 1.0
             total_debt = metrics.get("total_debt") or 0.0
